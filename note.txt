@@ -1,0 +1,9 @@
+n_seen[n_touched>0] += 1
+
+n_seen = torch.zeros([self.gaussians.get_xyz.shape[0]]).cuda()
+            scale_grad_acm = torch.zeros_like(self.gaussians.get_scaling)
+            scaling_old = Non
+
+if cam_idx != 0:
+                    ratio = scale_grad_acm[n_touched>0] / n_seen[n_touched>0].unsqueeze(-1)
+                    loss_mapping += (ratio * torch.abs(scaling_old[n_touched>0]  - self.gaussians._scaling[n_touched>0])).sum()
