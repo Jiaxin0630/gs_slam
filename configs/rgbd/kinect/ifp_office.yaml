@@ -1,0 +1,18 @@
+inherit_from: "configs/rgbd/kinect/base_config.yaml"
+
+Dataset:
+  dataset_path: "/media/jiaxin/Jiaxin-usb/ma_final/data/kinect/ifp_office/dataDroid"
+  intrinsic:
+    fx: 608.0913696289062
+    fy: 608.2593994140625
+    cx: 640.7423095703125
+    cy: 363.4864807128906
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0
+    distorted: False
+    width: 1280
+    height: 720
+    depth_scale: 1000.0

@@ -83,21 +83,32 @@ def get_loss_mapping(config, image, rendered_depth, viewpoint, opacity):
     gt_image = viewpoint.original_image.cuda()
     gt_depth = torch.from_numpy(viewpoint.depth).to(
         dtype=torch.float32, device=image.device
-    )[None]
-    m = (gt_depth > 0) * (rendered_depth > 0)
-    Ll1 = l1_loss(image, gt_image)
-    loss = (1.0 - config['opt_params']['lambda_dssim']) * Ll1 + config['opt_params']['lambda_dssim'] * (1.0 - ssim(image, gt_image))
-  
-    loss = loss + \
-            0.0*depth_ranking_loss((rendered_depth*m).squeeze(), (gt_depth*m).squeeze()) + \
-            l1dep_loss((rendered_depth*m).squeeze(), (gt_depth*m).squeeze()) 
-    
-    return loss
+    )[None] 
+    depth_pixel_mask = (gt_depth > 0.01).view(*rendered_depth.shape)
 
+    l1_rgb = torch.abs(image - gt_image )
+    l1_depth = torch.abs(rendered_depth * depth_pixel_mask - gt_depth * depth_pixel_mask)
+    
+    return l1_rgb.mean() + (1 - 0.95) * l1_depth.mean()
+
+def final_loss(viewpoint_cam, image, depth, visbility, opt,  gaussians=None, dep_loss_ratio=0, iso_reg_ratio=0):
+    
+    gt_image = viewpoint_cam.original_image.cuda()
+    gt_depth = torch.from_numpy(viewpoint_cam.depth).cuda()
+    Ll1 = l1_loss(image, gt_image)
+    Ll1_dep = l1dep_loss(depth.squeeze(), gt_depth)
+
+    row_means = gaussians.get_scaling[visbility].mean(dim=1, keepdim=True)
+    iso_regularisation = (gaussians.get_scaling[visbility] - row_means).abs().mean()  
+    loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + iso_reg_ratio*iso_regularisation
+  
+    loss += dep_loss_ratio*Ll1_dep
+    
+    return loss, Ll1,Ll1_dep
 
 def get_isotropic_loss_1(scaling, hp = 1.0):
     max,_ = torch.max(scaling,1)
-    min,_ = torch.min(scaling,1)
+    min,_ = torch.min(scaling+0.01,1)
     
     loss = 1.0/scaling.shape[0]*(torch.max(max/min,torch.tensor(hp))-hp).sum()
     return loss

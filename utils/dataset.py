@@ -25,8 +25,7 @@ class DroidParser:
             self.kf_indices.append(int(extr[0]))
             
     def load_poses(self, dataset_path):
-        T_droid = np.load(os.path.join(dataset_path,"trajectory_w2c.npy"))
-        T_gt = np.loadtxt(os.path.join(dataset_path,"gt_w2c.txt"))
+       
         
         self.R = []
         self.T = []
@@ -34,28 +33,53 @@ class DroidParser:
         self.poses_droid = []
         frames = []
         
-        for i, (extr_cam, extr_gt) in enumerate(zip(T_droid, T_gt)):
+        T_droid = np.load(os.path.join(dataset_path,"trajectory_w2c.npy"))
+        try:
+            T_gt = np.loadtxt(os.path.join(dataset_path,"gt_w2c.txt"))
             
-            R_cam = qvec2rotmat(extr_cam[[7, 4, 5, 6]])
-            T_cam = np.array(extr_cam[1:4])
-            pose_cam = np.eye(4)
-            pose_cam[:3, :3] = R_cam
-            pose_cam[:3, 3] = T_cam
-            self.poses_droid.append(pose_cam)
+            for i, (extr_cam, extr_gt) in enumerate(zip(T_droid, T_gt)):
+                R_cam = qvec2rotmat(extr_cam[[7, 4, 5, 6]])
+                T_cam = np.array(extr_cam[1:4])
+                pose_cam = np.eye(4)
+                pose_cam[:3, :3] = R_cam
+                pose_cam[:3, 3] = T_cam
+                self.poses_droid.append(pose_cam)
 
-            R_gt = qvec2rotmat(extr_gt[[6, 3, 4, 5]])
-            T_gt = np.array(extr_gt[0:3])
-            pose_gt = np.eye(4)
-            pose_gt[:3, :3] = R_gt
-            pose_gt[:3, 3] = T_gt
-            self.poses.append(pose_gt)
+                R_gt = qvec2rotmat(extr_gt[[6, 3, 4, 5]])
+                T_gt = np.array(extr_gt[0:3])
+                pose_gt = np.eye(4)
+                pose_gt[:3, :3] = R_gt
+                pose_gt[:3, 3] = T_gt
+                self.poses.append(pose_gt)
 
-            frame = {
-                "file_path": self.color_paths[i],
-                "depth_path": self.depth_paths[i],
-                "transform_matrix": pose_gt.tolist(), 
-            }
-            frames.append(frame)
+                frame = {
+                    "file_path": self.color_paths[i],
+                    "depth_path": self.depth_paths[i],
+                    "transform_matrix": pose_gt.tolist(), 
+                }
+                frames.append(frame)
+            
+        except:
+            T_gt = None
+            for i, extr_cam in enumerate(T_droid):
+                R_cam = qvec2rotmat(extr_cam[[7, 4, 5, 6]])
+                T_cam = np.array(extr_cam[1:4])
+                pose_cam = np.eye(4)
+                pose_cam[:3, :3] = R_cam
+                pose_cam[:3, 3] = T_cam
+                self.poses_droid.append(pose_cam)
+                
+                pose_gt = np.eye(4)
+                self.poses.append(pose_gt)
+
+                frame = {
+                    "file_path": self.color_paths[i],
+                    "depth_path": self.depth_paths[i],
+                    "transform_matrix": pose_gt.tolist(), 
+                }
+                frames.append(frame)
+            
+        
             
         self.frames = frames
         

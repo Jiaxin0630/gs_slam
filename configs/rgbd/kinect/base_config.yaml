@@ -1,26 +1,26 @@
 ## SLAM parameters
 Results:
   save_results: True
-  save_dir: "results/tum"
-  save_trj: True
+  save_dir: "results/kinect"
+  save_trj: False
   save_trj_kf_intv: 5
-  use_gui: False
+  use_gui: True                                                                                                                                                                                                                                                    
   eval_rendering: True
   use_wandb: False  
 
 Dataset:
   type: 'droid'
   sensor_type: 'depth'
-  save_only_kf: False
+  save_only_kf: True
   use_droid_keyframe: True
-  pcd_downsample: 512
+  pcd_downsample: 12800
   pcd_downsample_init: 32
   adaptive_pointsize: True
   point_size: 0.01
   global_optimization_during: True
   global_optimization_num: 4
   global_optimization_iter_max: 25000
-  refine_pose_from: 200000
+  refine_pose_from: 2000
 
 Tracking:
   eval_ate: False
@@ -33,8 +33,8 @@ Tracking:
 Training:
   # Initialization
   init_itr_num: 1050
-  init_gaussian_update: 100
-  init_gaussian_reset: 500
+  init_gaussian_update: 500
+  init_gaussian_reset: 2000
   init_min_opacity: 0.005
   init_gaussian_extent: 30
   # Tracking and Mapping
@@ -42,15 +42,15 @@ Training:
   forward_pose: False
   prev_pose: False
   tracking_itr_num: 150
-  tracking_itr_num_droid: 1
-  mapping_itr_num: 100
-  gaussian_update_every: 200
+  tracking_itr_num_droid: 5
+  mapping_itr_num: 150
+  gaussian_update_every: 1000
   gaussian_update_offset: 50
   gaussian_th: 0.7
   gaussian_extent: 1.0
   gaussian_reset: 2001
   size_threshold: 20
-  window_size: 10
+  window_size: 8
   pose_window: 3
   edge_threshold: 1.1
   gray_scale_threshold: 0.01
@@ -58,7 +58,7 @@ Training:
   kf_translation: 0.25
   kf_min_translation: 0.25
   kf_max_interval : 30
-  kf_overlap: 0.7
+  kf_overlap: 0.5
   kf_cutoff: 0.3
   prune_mode: 'slam'
   single_thread: False

@@ -310,6 +310,7 @@ renderCUDA(
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
 	float D = 0.0f;
+	float O_ = 0.0f;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -365,6 +366,7 @@ renderCUDA(
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 			}
 			D += collected_depth[j] * alpha * T;
+			O_ +=  alpha * T;
 			// Keep track of how many pixels touched this Gaussian.
 			if (test_T > 0.5f) {
 				atomicAdd(&(n_touched[collected_id[j]]), 1);
@@ -387,7 +389,8 @@ renderCUDA(
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		}
 		out_depth[pix_id] = D;
-		out_opacity[pix_id] = 1 - T;
+		// out_opacity[pix_id] = 1 - T;
+		out_opacity[pix_id] = O_;
 	}
 }
 

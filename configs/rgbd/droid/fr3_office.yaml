@@ -1,7 +1,7 @@
 inherit_from: "configs/rgbd/droid/base_config.yaml"
 
 Dataset:
-  dataset_path: "/media/jiaxin/Jiaxin-usb/data/rgbd_dataset_freiburg3_long_office_household"
+  dataset_path: "/media/jiaxin/Jiaxin-usb/ma_final/data/tum/rgbd_dataset_freiburg3_long_office_household/dataDroid"
   has_depth: True
   intrinsic:
     fx: 535.4

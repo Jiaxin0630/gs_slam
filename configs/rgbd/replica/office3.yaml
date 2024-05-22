@@ -1,4 +1,4 @@
 inherit_from: "configs/rgbd/replica/base_config.yaml"
 Dataset:
-  dataset_path: "datasets/replica/office3/"
-  single_thread: False
+  dataset_path: "/media/jiaxin/Jiaxin-usb/ma_final/data/replica/office3/dataDroid"
+  single_thread: True
