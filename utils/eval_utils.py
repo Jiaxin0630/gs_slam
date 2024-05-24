@@ -299,8 +299,12 @@ def eval_rendering(
             
             depth = results["depth"]
             
-            L1_depth_loss = l1dep_loss(depth, torch.from_numpy(gt_depth).to(
-                dtype=torch.float32, device=rendering.device)[None])
+            gt_depth = torch.from_numpy(gt_depth).to(
+                dtype=torch.float32, device=rendering.device)[None]
+            
+            depth_pixel_mask = (gt_depth > 0.01).view(*depth.shape)
+            
+            L1_depth_loss = l1dep_loss(depth*depth_pixel_mask, gt_depth*depth_pixel_mask)
             
             gt = (gt_image.cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
             pred = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(
@@ -309,10 +313,10 @@ def eval_rendering(
             gt = cv2.cvtColor(gt, cv2.COLOR_BGR2RGB)
             pred = cv2.cvtColor(pred, cv2.COLOR_BGR2RGB)
             
-            gt_depth_scaled = torch.from_numpy(gt_depth).to("cuda") / (depth.max() + 1e-5)
+            gt_depth_scaled = gt_depth / (depth.max() + 1e-5)
             depth_scaled = depth / (depth.max() + 1e-5)
         
-            gt_depth_normalized = cv2.normalize(gt_depth, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            gt_depth_normalized = cv2.normalize(gt_depth.squeeze().cpu().numpy(), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
             gt_depth_colorized = cv2.applyColorMap(gt_depth_normalized, cv2.COLORMAP_VIRIDIS)
 
             depth_normalized = cv2.normalize(depth.squeeze().cpu().numpy(), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
@@ -330,17 +334,17 @@ def eval_rendering(
             lpips_array.append(lpips_score.item())
             l1dep_loss_array.append(L1_depth_loss.item())
             
-            # if iteration == "final":
-            #     cv2.imwrite(f"{depth_path}/{idx:05d}.png", (depth_colorized))
-            #     out1 = torch.cat((gt_image, rendering), dim=2)
-            #     out2 = torch.cat((torch.from_numpy(gt_depth_colorized).permute(2,0,1).cuda()/ 255.0, 
-            #                       torch.from_numpy(depth_colorized).permute(2,0,1).cuda()/ 255.0), dim=2)
-            #     out = torch.cat((out1, out2), dim=1)
-            #     torchvision.utils.save_image(out, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
+            if iteration == "final":
+                cv2.imwrite(f"{depth_path}/{idx:05d}.png", (depth_colorized))
+                out1 = torch.cat((gt_image, rendering), dim=2)
+                out2 = torch.cat((torch.from_numpy(gt_depth_colorized).permute(2,0,1).cuda()/ 255.0, 
+                                  torch.from_numpy(depth_colorized).permute(2,0,1).cuda()/ 255.0), dim=2)
+                out = torch.cat((out1, out2), dim=1)
+                torchvision.utils.save_image(out, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
                 
                 
 
-        # images_to_video(render_path, os.path.join(save_dir, "render.mp4"))
+        images_to_video(render_path, os.path.join(save_dir, "render.mp4"))
         
         output = dict()
         output["mean_psnr"] = float(np.mean(psnr_array))

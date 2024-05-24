@@ -4,31 +4,26 @@ Results:
   save_dir: "results/tum"
   save_trj: True
   save_trj_kf_intv: 5
-  use_gui: False
-  eval_rendering: True
+  use_gui: True
   use_wandb: False  
 
 Dataset:
   type: 'droid'
   sensor_type: 'depth'
-  save_only_kf: False
+  save_only_kf: True
   use_droid_keyframe: True
-  pcd_downsample: 512
+  pcd_downsample: 60
   pcd_downsample_init: 32
-  adaptive_pointsize: True
   point_size: 0.01
-  global_optimization_during: True
-  global_optimization_num: 4
-  global_optimization_iter_max: 25000
-  refine_pose_from: 200000
+  adaptive_pointsize: True
 
-Tracking:
-  eval_ate: False
-  eval_ate_every: 100
-  eval_ate_after: 100
+Eval:
+  eval_ate_every: 1
+  eval_ate_after: 10
   eval_plot_flag: True
   eval_ate_all: True
-  isotropic_loss_ratio: 0.3
+  eval_tracking: True
+  eval_mapping: True
 
 Training:
   # Initialization
@@ -37,31 +32,44 @@ Training:
   init_gaussian_reset: 500
   init_min_opacity: 0.005
   init_gaussian_extent: 30
-  # Tracking and Mapping
+
+  # Tracking
   use_droid_pose: True
   forward_pose: False
   prev_pose: False
   tracking_itr_num: 150
-  tracking_itr_num_droid: 1
+  tracking_itr_num_droid: 40
+  gray_scale_threshold: 0.01
+  tracking_color_ratio: 0.9
+  tracking_depth_ratio: 0.1
+
+  # Mapping
   mapping_itr_num: 100
-  gaussian_update_every: 200
-  gaussian_update_offset: 50
-  gaussian_th: 0.7
+  gaussian_update_every: 300
+  gaussian_update_offset: 30
+  gaussian_th: 0.6
   gaussian_extent: 1.0
   gaussian_reset: 2001
   size_threshold: 20
-  window_size: 10
-  pose_window: 3
-  edge_threshold: 1.1
-  gray_scale_threshold: 0.01
-  depth_ratio: 0.1
-  kf_translation: 0.25
-  kf_min_translation: 0.25
+  mapping_color_ratio: 0.8
+  mapping_dssim_ratio: 0.2
+  mapping_depth_ratio: 1
+  mapping_isotropic_loss_ratio: 0.6
+  
+
+  # Keyframe Selection
+  window_size: 8
+  pose_window: 4
+  kf_translation: 0.4
+  kf_min_translation: 0.2
   kf_max_interval : 30
-  kf_overlap: 0.7
+  kf_overlap: 0.8
   kf_cutoff: 0.3
-  prune_mode: 'slam'
-  single_thread: False
+  depth_error_percent: 0.3
+  depth_error_th: 0.5
+  
+
+  # rest
   spherical_harmonics: True
   max_sh_degree: 3
   lr:
@@ -71,6 +79,20 @@ Training:
 ## 3DGS default parameters
 opt_params:
   iterations: 20000
+  refine_pose_from: 200000
+
+  percent_dense: 0.02
+  densification_interval: 500
+  opacity_reset_interval: 3000
+  densify_from_iter: 1000
+  densify_until_iter: 15000
+  densify_grad_threshold: 0.0002
+
+  color_ratio: 0.8
+  dssim_ratio: 0.2
+  depth_ratio: 2
+  isotropic_loss_ratio: 0.6
+
   position_lr_init: 0.00016
   position_lr_final: 0.0000016
   position_lr_delay_mult: 0.01
@@ -79,13 +101,6 @@ opt_params:
   opacity_lr: 0.05
   scaling_lr: 0.001
   rotation_lr: 0.001
-  percent_dense: 0.02
-  lambda_dssim: 0.2
-  densification_interval: 400
-  opacity_reset_interval: 2000
-  densify_from_iter: 1000
-  densify_until_iter: 15000
-  densify_grad_threshold: 0.0002
 
 model_params:
   sh_degree: 0

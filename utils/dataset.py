@@ -33,6 +33,7 @@ class DroidParser:
         self.poses_droid = []
         frames = []
         
+        
         T_droid = np.load(os.path.join(dataset_path,"trajectory_w2c.npy"))
         try:
             T_gt = np.loadtxt(os.path.join(dataset_path,"gt_w2c.txt"))
@@ -61,7 +62,8 @@ class DroidParser:
             
         except:
             T_gt = None
-            for i, extr_cam in enumerate(T_droid):
+            for i, extr_cam in enumerate(range(0, len(self.color_paths))):
+                extr_cam = T_droid[i,:]
                 R_cam = qvec2rotmat(extr_cam[[7, 4, 5, 6]])
                 T_cam = np.array(extr_cam[1:4])
                 pose_cam = np.eye(4)

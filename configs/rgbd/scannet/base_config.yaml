@@ -1,10 +1,10 @@
 ## SLAM parameters
 Results:
   save_results: True
-  save_dir: "results/replica"
+  save_dir: "results/scannet"
   save_trj: True
   save_trj_kf_intv: 5
-  use_gui: False
+  use_gui: True
   use_wandb: False  
 
 Dataset:
@@ -12,24 +12,10 @@ Dataset:
   sensor_type: 'depth'
   save_only_kf: True
   use_droid_keyframe: True
-  pcd_downsample: 72
+  pcd_downsample: 60
   pcd_downsample_init: 32
-  point_size: 0.05
+  point_size: 0.04
   adaptive_pointsize: True
-  intrinsic:
-    fx: 600.0
-    fy: 600.0
-    cx: 599.5
-    cy: 339.5
-    k1: 0.0
-    k2: 0.0
-    p1: 0.0
-    p2: 0.0
-    k3: 0.0
-    width: 1200
-    height: 680
-    depth_scale: 6553.5
-    distorted: False
 
 Eval:
   eval_ate_every: 1
@@ -37,7 +23,7 @@ Eval:
   eval_plot_flag: True
   eval_ate_all: True
   eval_tracking: True
-  eval_mapping: False
+  eval_mapping: True
 
 Training:
   # Initialization
@@ -52,7 +38,7 @@ Training:
   forward_pose: False
   prev_pose: True
   tracking_itr_num: 150
-  tracking_itr_num_droid: 100
+  tracking_itr_num_droid: 40
   gray_scale_threshold: 0.01
   tracking_color_ratio: 0.9
   tracking_depth_ratio: 0.1
@@ -67,17 +53,17 @@ Training:
   size_threshold: 20
   mapping_color_ratio: 0.8
   mapping_dssim_ratio: 0.2
-  mapping_depth_ratio: 0.2
-  mapping_isotropic_loss_ratio: 8
+  mapping_depth_ratio: 1
+  mapping_isotropic_loss_ratio: 20
   
 
   # Keyframe Selection
   window_size: 8
   pose_window: 4
   kf_translation: 0.4
-  kf_min_translation: 0.1
-  kf_max_interval : 30
-  kf_overlap: 0.8
+  kf_min_translation: 0.2
+  kf_max_interval : 20
+  kf_overlap: 0.9
   kf_cutoff: 0.3
   depth_error_percent: 0.3
   depth_error_th: 0.5
@@ -87,8 +73,8 @@ Training:
   spherical_harmonics: True
   max_sh_degree: 3
   lr:
-    cam_rot_delta: 0.003
-    cam_trans_delta: 0.001
+    cam_rot_delta: 0.001
+    cam_trans_delta: 0.0006
 
 ## 3DGS default parameters
 opt_params:
@@ -104,8 +90,8 @@ opt_params:
 
   color_ratio: 0.8
   dssim_ratio: 0.2
-  depth_ratio: 0.4
-  isotropic_loss_ratio: 10
+  depth_ratio: 2
+  isotropic_loss_ratio: 0.6
 
   position_lr_init: 0.00016
   position_lr_final: 0.0000016

@@ -59,10 +59,12 @@ def get_loss_tracking(config, image, depth, opacity, viewpoint):
     gt_image = viewpoint.original_image.cuda()
     _, h, w = gt_image.shape
     mask_shape = (1, h, w)
-    depth_ratio = config["Training"]["depth_ratio"]
+    
+    color_ratio = config["Training"]["tracking_color_ratio"]
+    depth_ratio = config["Training"]["tracking_depth_ratio"]
+    
     gray_scale_threshold = config["Training"]["gray_scale_threshold"]
     gray_scale = 0.299*gt_image[0,...] + 0.587 * gt_image[1,...]  + 0.114 * gt_image[2,...]
-    
     gray_mask = (gray_scale> gray_scale_threshold).view(*mask_shape) * (gray_scale < (1 - gray_scale_threshold)).view(*mask_shape)
     
     gt_depth = torch.from_numpy(viewpoint.depth).to(
@@ -76,20 +78,30 @@ def get_loss_tracking(config, image, depth, opacity, viewpoint):
     
     depth_mask = depth_pixel_mask * opacity_mask
     l1_depth = torch.abs(depth * depth_mask - gt_depth * depth_mask)
-    return (1-depth_ratio) * l1_rgb + depth_ratio * l1_depth.mean()
+    return color_ratio * l1_rgb + depth_ratio * l1_depth.mean()
 
 
-def get_loss_mapping(config, image, rendered_depth, viewpoint, opacity):
+def get_loss_mapping(config, image, rendered_depth, viewpoint, opacity, final_opt=False):
     gt_image = viewpoint.original_image.cuda()
     gt_depth = torch.from_numpy(viewpoint.depth).to(
         dtype=torch.float32, device=image.device
     )[None] 
     depth_pixel_mask = (gt_depth > 0.01).view(*rendered_depth.shape)
-
-    l1_rgb = torch.abs(image - gt_image )
-    l1_depth = torch.abs(rendered_depth * depth_pixel_mask - gt_depth * depth_pixel_mask)
     
-    return l1_rgb.mean() + (1 - 0.95) * l1_depth.mean()
+    if not final_opt:
+        dssim_ratio = config['Training']['mapping_dssim_ratio']
+        color_ratio = config['Training']['mapping_color_ratio']
+        depth_ratio = config['Training']['mapping_depth_ratio']
+    else:
+        dssim_ratio = config['opt_params']['dssim_ratio']
+        color_ratio = config['opt_params']['color_ratio']
+        depth_ratio = config['opt_params']['depth_ratio']
+
+    l1_rgb = color_ratio * l1_loss(image, gt_image) + dssim_ratio* (1.0 - ssim(image, gt_image))
+
+    l1_depth = l1dep_loss(rendered_depth * depth_pixel_mask, gt_depth * depth_pixel_mask)
+    
+    return l1_rgb + depth_ratio* l1_depth
 
 def final_loss(viewpoint_cam, image, depth, visbility, opt,  gaussians=None, dep_loss_ratio=0, iso_reg_ratio=0):
     
@@ -114,7 +126,7 @@ def get_isotropic_loss_1(scaling, hp = 1.0):
     return loss
 
 def get_isotropic_loss_2(scaling):
-    loss = torch.abs(scaling - scaling.mean(dim=1).view(-1, 1))
+    loss = torch.abs(scaling - scaling.mean(dim=1).view(-1, 1)).mean()
     return loss
 
 def get_median_depth(depth, opacity=None, mask=None, return_std=False):
@@ -131,12 +143,11 @@ def get_median_depth(depth, opacity=None, mask=None, return_std=False):
     return valid_depth.median()
 
 def l1_loss(network_output, gt):
-    return torch.abs((network_output - gt)).mean()
+    return torch.abs(network_output - gt).mean()
 
 def l1dep_loss(network_output, gt):
-    m = (gt > 0) * (network_output > 0)
-    # return torch.abs((network_output[m] - gt[m])).mean()
-    return torch.abs((1/network_output[m] - 1/gt[m])).mean()
+    return torch.abs(network_output - gt).mean()
+    # return torch.abs((1/network_output[m] - 1/gt[m])).mean()
 
 def depth_ranking_loss(rendered_depth, gt_depth):
     """

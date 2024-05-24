@@ -137,7 +137,7 @@ class GaussianModel:
                                                     pipeline_params = pipeline_params,
                                                     background = background)
 
-    def create_pcd_from_image_and_depth(self, cam, rgb, depth, init=False, 
+    def create_pcd_from_image_and_depth2(self, cam, rgb, depth, init=False, 
                                         render = None,
                                         pipeline_params = None,
                                         background = None):
@@ -200,6 +200,7 @@ class GaussianModel:
                     p=prob_map_flat)
                 
                 non_presence_mask = non_presence_mask & (depth_torch>0)
+                
                 non_presence_mask = non_presence_mask.reshape(-1)
                 non_presence_mask[sampled_indices]=True
                 rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
@@ -273,12 +274,13 @@ class GaussianModel:
     
     
     
-    def create_pcd_from_image_and_depth2(self, cam, rgb, depth, init=False, 
+    def create_pcd_from_image_and_depth(self, cam, rgb, depth, init=False, 
                                         render = None,
                                         pipeline_params = None,
                                         background = None):
         if init:
             downsample_factor = self.config["Dataset"]["pcd_downsample_init"]
+      
             point_size = self.config["Dataset"]["point_size"]
 
             gray = cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2GRAY)
@@ -337,20 +339,49 @@ class GaussianModel:
                     cam, self, pipeline_params, background
                 )
                 
+                gray = cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2GRAY)
+                grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+                grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+                grad_magnitude = cv2.magnitude(grad_x, grad_y)
+
+                # Normalize the gradient magnitude to create a probability map
+                prob_map = grad_magnitude / np.sum(grad_magnitude)
+
+                # Flatten the probability map
+                prob_map_flat = prob_map.flatten()
+                
+                sampled_indices = np.random.choice(
+                    prob_map_flat.size, 
+                    size=int((np.asarray(rgb).shape[0]*np.asarray(rgb).shape[1]/self.config["Dataset"]["pcd_downsample"])), 
+                    p=prob_map_flat)
+                
                 render_depth = render_pkg["depth"].cpu()
                 opacity = render_pkg["opacity"].cpu()
                 self.optimizer.zero_grad(set_to_none=True)
-                opacity_mask = opacity < 0.1
+                opacity_mask = opacity < 0.05
                 
                 depth_torch = torch.from_numpy(np.asarray(depth)).cpu()
                 depth_error = torch.abs(depth_torch- render_depth) * (depth_torch > 0)
                 # depth_guided = torch.where(depth_torch != 0, depth_error / depth_torch, torch.tensor(0.0))
                 
-                non_presence_mask = (depth_error > 20*depth_error.median())
+                non_presence_mask = torch.logical_and(depth_error > 60*depth_error.median(), render_depth > depth_torch) 
                 
                 non_presence_mask =  torch.logical_or(non_presence_mask, opacity_mask)
                 
                 non_presence_mask = non_presence_mask.reshape(-1)
+                non_presence_mask [sampled_indices] = True
+                
+                true_indices = torch.nonzero(non_presence_mask, as_tuple=False).squeeze()
+    
+                true_count = true_indices.size(0)
+                max_true_count =  int((np.asarray(rgb).shape[0]*np.asarray(rgb).shape[1]/self.config["Dataset"]["pcd_downsample"]))
+                if true_count > max_true_count:
+                    excess_count = true_count - max_true_count
+                    random_indices = torch.randperm(true_count)[:excess_count]
+                    non_presence_mask[true_indices[random_indices]] = False
+                
+                
+                
                 rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
                     rgb,
                     depth,

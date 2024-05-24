@@ -1,6 +1,6 @@
 import os
 import sys
-import copy
+import shutil
 import time
 import random
 from tqdm import tqdm
@@ -59,10 +59,8 @@ class SLAM:
 
         self.tracking_loss = 0
         self.tracking_iter = 0
-        self.global_optimization_iter = 0
         self.use_spherical_harmonics = self.config["Training"]["spherical_harmonics"]
         self.use_gui = self.config["Results"]["use_gui"]
-        self.eval_rendering = self.config["Results"]["eval_rendering"]
 
         model_params.sh_degree = 3 if self.use_spherical_harmonics else 0
 
@@ -90,23 +88,18 @@ class SLAM:
             q_vis2main=q_vis2main,
         )
         
-        self.initialized = False
         self.kf_indices = []
         self.mapping_iter_count = 0
         self.keyframe_visibility = {}
         self.current_keyframe_window = []
         self.viewpoints = {}
 
-        self.reset = True
-        self.requested_init = False
-        self.requested_keyframe = 0
         self.use_every_n_frames = 1
 
         self.cameras = dict()
         self.device = "cuda:0" 
         self.set_tracking_params()
         self.set_mapping_params()
-        self.mapping_iter_count = 0
         projection_matrix = getProjectionMatrix2(
             znear=0.01,
             zfar=100.0,
@@ -192,15 +185,15 @@ class SLAM:
                      
                 render_pkg = self.tracking(cur_frame_idx, viewpoint, keyframes)
                 
-                if self.config['Tracking']['eval_ate'] and \
-                        cur_frame_idx > self.config['Tracking']['eval_ate_after'] and \
-                        cur_frame_idx % self.config['Tracking']['eval_ate_every'] == 0:                           
-                    eval_all  = self.config['Tracking']['eval_ate_all']
+                if self.config['Eval']['eval_tracking'] and \
+                        cur_frame_idx > self.config['Eval']['eval_ate_after'] and \
+                        cur_frame_idx % self.config['Eval']['eval_ate_every'] == 0:                           
+                    eval_all  = self.config['Eval']['eval_ate_all']
                     eval_ate_tracking(self.cameras, self.kf_indices, eval_all=eval_all, correct_scale=True, fig_plot = fig)
 
                 last_keyframe_idx = self.current_keyframe_window[0]
                 visibility = (render_pkg["n_touched"] > 0).long()
-                create_kf = self.is_keyframe(cur_frame_idx,last_keyframe_idx,visibility,self.keyframe_visibility,
+                create_kf = self.is_keyframe(viewpoint, cur_frame_idx, last_keyframe_idx,visibility,self.keyframe_visibility,
                                              self.config['Dataset']['use_droid_keyframe'],
                                              self.kf_indices_droid)
                     
@@ -270,19 +263,20 @@ class SLAM:
                 self.keyframe_optimizers = torch.optim.Adam(opt_params)
                 self.keyframe_mapping(iter_per_kf, render_uncertainty=False)
 
-                if self.config['Tracking']['eval_ate']:
+                if self.config['Eval']['eval_tracking']:
                     eval_ate_tracking(self.cameras, self.kf_indices, 
-                                      eval_all=self.config['Tracking']['eval_ate_all'], correct_scale=True, fig_plot = fig)
+                                      eval_all=self.config['Eval']['eval_ate_all'], correct_scale=True, fig_plot = fig)
                 
-                # eval_rendering_mapping(
-                #     self.cameras,
-                #     1,
-                #     self.gaussians,
-                #     self.dataset,
-                #     self.pipeline_params,
-                #     self.background,
-                #     self.kf_indices,
-                #     cal_lpips=cal_lpips)
+                if self.config['Eval']['eval_mapping']:
+                    eval_rendering_mapping(
+                        self.cameras,
+                        1,
+                        self.gaussians,
+                        self.dataset,
+                        self.pipeline_params,
+                        self.background,
+                        self.kf_indices,
+                        cal_lpips=cal_lpips)
                 mapping = False
                     
            
@@ -294,31 +288,17 @@ class SLAM:
         FPS = N_frames / (start.elapsed_time(end) * 0.001)
         Log("Total time", start.elapsed_time(end) * 0.001, tag="Eval")
         Log("Total FPS", FPS, tag="Eval")
-        
-        eval_rendering(
-                self.cameras,
-                self.gaussians,
-                self.dataset,
-                self.save_dir,
-                self.pipeline_params,
-                self.background,
-                kf_indices=self.kf_indices,
-                iteration="final",
-                projection_matrix=self.projection_matrix
-        )
-        
-         
+ 
         self.final_optimization(render_uncertainty=False)
         
-        
-        eval_ate(
-            self.cameras,
-            self.kf_indices,
-            self.save_dir,
-            0,
-            final=True,
-            correct_scale=True,
-        )
+        # eval_ate(
+        #     self.cameras,
+        #     self.kf_indices,
+        #     self.save_dir,
+        #     0,
+        #     final=True,
+        #     correct_scale=True,
+        # )
 
         eval_rendering(
                 self.cameras,
@@ -431,23 +411,16 @@ class SLAM:
             render_pkg = render(
                 viewpoint, self.gaussians, self.pipeline_params, self.background
             )
+            
             (
-                image,
-                viewspace_point_tensor,
-                visibility_filter,
-                radii,
-                depth,
-                opacity,
-                n_touched,
-            ) = (
-                render_pkg["render"],
-                render_pkg["viewspace_points"],
-                render_pkg["visibility_filter"],
-                render_pkg["radii"],
-                render_pkg["depth"],
-                render_pkg["opacity"],
-                render_pkg["n_touched"],
+                image, depth,
+                viewspace_point_tensor,visibility_filter,
+                radii,opacity,n_touched) = (
+                render_pkg["render"],render_pkg["depth"],
+                render_pkg["viewspace_points"],render_pkg["visibility_filter"],
+                render_pkg["radii"],render_pkg["opacity"],render_pkg["n_touched"],
             )
+                
             loss_init = get_loss_mapping(
                 self.config, image, depth, viewpoint, opacity
             )
@@ -603,14 +576,16 @@ class SLAM:
         torch.cuda.empty_cache()
         return render_pkg
     
-    def is_keyframe(self,cur_frame_idx,last_keyframe_idx,cur_frame_visibility_filter,keyframe_visibility,
+    def is_keyframe(self, viewpoint, cur_frame_idx,last_keyframe_idx,cur_frame_visibility_filter,keyframe_visibility,
                     use_droid_keyframe = False,
                     kf_indices_droid = None):
         
         kf_translation = self.config["Training"]["kf_translation"]
         kf_min_translation = self.config["Training"]["kf_min_translation"]
         kf_overlap = self.config["Training"]["kf_overlap"]
-
+        depth_error_percent_th = self.config["Training"]["depth_error_percent"]
+        depth_error_th = self.config["Training"]["depth_error_th"]
+        
         curr_frame = self.cameras[cur_frame_idx]
         last_kf = self.cameras[last_keyframe_idx]
         pose_CW = getWorld2View2(curr_frame.R, curr_frame.T)
@@ -620,6 +595,20 @@ class SLAM:
         dist_check = dist > kf_translation * self.median_depth
         dist_check2 = dist > kf_min_translation * self.median_depth
 
+        with torch.no_grad():
+            depth = render(
+                    viewpoint, self.gaussians, self.pipeline_params, self.background
+                )["depth"]
+            gt_depth = torch.from_numpy(viewpoint.depth).to(
+                dtype=torch.float32, device= "cuda"
+            )[None]
+            depth_pixel_mask = (gt_depth > 0.01).view(*depth.shape)
+            
+            depth_error = torch.abs(depth * depth_pixel_mask - gt_depth * depth_pixel_mask)
+            depth_error =  torch.where(gt_depth * depth_pixel_mask != 0, depth_error / (gt_depth*depth_pixel_mask), torch.tensor(0.0).cuda())
+            depth_error_percent =  (depth_error > depth_error_th).sum() / (gt_depth * depth_pixel_mask).sum()
+
+            
         union = torch.logical_or(
             cur_frame_visibility_filter, keyframe_visibility[last_keyframe_idx]
         ).count_nonzero()
@@ -633,6 +622,9 @@ class SLAM:
                 return True
         if (point_ratio_2 < kf_overlap and dist_check2):
             print("[bold purple4]    keyframe detected because of low overlapping[/bold purple4]")
+            return True
+        elif depth_error_percent > depth_error_percent_th:
+            print("[bold purple4]    keyframe detected because of large depth error[/bold purple4]")
             return True
         elif dist_check:
             print("[bold purple4]    keyframe detected because of large translation[/bold purple4]")
@@ -778,7 +770,7 @@ class SLAM:
                 )
 
             scaling = self.gaussians.get_scaling
-            loss_mapping += self.config['Tracking']['isotropic_loss_ratio']*get_isotropic_loss_1(scaling)       
+            loss_mapping += self.config['Training']['mapping_isotropic_loss_ratio']*get_isotropic_loss_2(scaling)
             t.set_description(f"        mapping loss = {loss_mapping.item()}")
             
             loss_mapping.backward()            
@@ -828,90 +820,6 @@ class SLAM:
                     if viewpoint.uid == 0:
                         continue
                     update_pose(viewpoint)
-    
-    
-    def global_optimization(self):
-        if self.global_optimization_iter + 1 != self.config['Dataset']['global_optimization_num']:
-            Log(f"global optimization: {self.global_optimization_iter+1} ..")
-        else:
-            Log("Final global optimization ..")
-
-        iter_num = int(self.config['Dataset']['global_optimization_iter_max'] / \
-            (self.config['Dataset']['global_optimization_num'] - self.global_optimization_iter))
-        
-        opt_params = []
-        for viewpoint in self.viewpoints.values():
-            opt_params.append(
-                {
-                    "params": [viewpoint.cam_rot_delta],
-                    "lr": 0.1*self.config["Training"]["lr"]["cam_rot_delta"],
-                    "name": "rot_{}".format(viewpoint.uid),
-                }
-            )
-            opt_params.append(
-                {
-                    "params": [viewpoint.cam_trans_delta],
-                    "lr": 0.1*self.config["Training"]["lr"]["cam_trans_delta"],
-                    "name": "trans_{}".format(viewpoint.uid),
-                }
-            )
-        self.keyframe_optimizers = torch.optim.Adam(opt_params)
-        t = tqdm(range(1, iter_num + 1))
-        viewpoint_idx_stack = None
-        
-        for iteration in t:
-            
-            self.gaussians.update_learning_rate(iteration)
-            if iteration % 1000 == 0 and (self.global_optimization_iter+1) == self.config['Dataset']['global_optimization_num']:
-                self.gaussians.max_sh_degree = self.config['Training']['max_sh_degree']
-                self.gaussians.oneupSHdegree()
-            viewpoint_idx_stack = list(self.viewpoints.keys())
-            viewpoint_cam_idx = viewpoint_idx_stack.pop(
-                random.randint(0, len(viewpoint_idx_stack) - 1)
-            )
-            viewpoint_cam = self.viewpoints[viewpoint_cam_idx]
-            render_pkg = render(
-                viewpoint_cam, self.gaussians, self.pipeline_params, self.background
-            )
-            image, depth, viewspace_point_tensor, visibility_filter, opacity, radii = (
-                render_pkg["render"],
-                render_pkg["depth"],
-                render_pkg["viewspace_points"],
-                render_pkg["visibility_filter"],
-                render_pkg["opacity"],
-                render_pkg["radii"],    
-            )
-
-            loss = get_loss_mapping(self.config, image, depth, viewpoint_cam, opacity)
-            scaling = self.gaussians.get_scaling
-            loss += self.config['Tracking']['isotropic_loss_ratio']*get_isotropic_loss_1(scaling)    
-            
-            
-            if iteration % 10 == 0:
-                t.set_description(f"        global loss = {loss.item()}")
-            loss.backward()
-            with torch.no_grad():
-                self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter],
-                                                                          radii[visibility_filter])
-                self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-                
-                if iteration % self.opt_params.densification_interval == 0:
-                    size_threshold = 20 if iteration > self.opt_params.opacity_reset_interval else None
-                    self.gaussians.densify_and_prune(self.opt_params.densify_grad_threshold, 
-                                                     0.005, self.mapping_params.gaussian_extent, size_threshold)
-                if iteration % self.opt_params.opacity_reset_interval == 0:
-                    self.gaussians.reset_opacity()
-                
-                self.gaussians.optimizer.step()
-                self.gaussians.optimizer.zero_grad(set_to_none=True)
-                # if iteration > self.config['Dataset']['refine_pose_from']:
-                self.keyframe_optimizers.step()
-                self.keyframe_optimizers.zero_grad(set_to_none=True)         
-                update_pose(viewpoint_cam)
-            
-        self.global_optimization_iter += 1
-        Log("[blod red]global optimization done..[/blod red]") 
-            
 
     def final_optimization(self, render_uncertainty = False):
 
@@ -955,29 +863,26 @@ class SLAM:
                 render_pkg["depth"],
             )
 
-            loss = get_loss_mapping(config, image, depth, viewpoint_cam, None)
+            loss = get_loss_mapping(config, image, depth, viewpoint_cam, None, final_opt=True)
             scaling = self.gaussians.get_scaling
-            loss += 0.4*get_isotropic_loss_1(scaling)
+            loss += self.config['opt_params']['isotropic_loss_ratio']*get_isotropic_loss_1(scaling)
             loss.backward()
-            
-            
+
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-            dep_loss_for_log = 0.4 * loss.item() + 0.6 * dep_loss_for_log
             if iteration % 10 == 0:
-                t.set_description(f"        Loss: {ema_loss_for_log}, L1dep: {dep_loss_for_log}")
+                t.set_description(f"        Loss: {ema_loss_for_log}")
 
             with torch.no_grad():
                 if iteration < self.opt_params.densify_until_iter:
                     self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter],
                                                                             radii[visibility_filter])
                     self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-                    
-                    if iteration > self.opt_params.densify_from_iter and iteration % self.opt_params.densification_interval == 0:
-                        size_threshold = 20 if iteration > self.opt_params.opacity_reset_interval else None
-                        self.gaussians.densify_and_prune(self.opt_params.densify_grad_threshold, 
-                                                        0.005, self.mapping_params.gaussian_extent, size_threshold)
-                    if iteration % self.opt_params.opacity_reset_interval == 0:
-                        self.gaussians.reset_opacity()
+                    # if iteration > self.opt_params.densify_from_iter and iteration % self.opt_params.densification_interval == 0:
+                    #     size_threshold = 20 if iteration > self.opt_params.opacity_reset_interval else None
+                    #     self.gaussians.densify_and_prune(self.opt_params.densify_grad_threshold, 
+                    #                                     0.005, self.mapping_params.gaussian_extent, size_threshold)
+                    # if iteration % self.opt_params.opacity_reset_interval == 0:
+                    #     self.gaussians.reset_opacity()
                     
                     self.gaussians.optimizer.step()
                     self.gaussians.optimizer.zero_grad(set_to_none=True)
@@ -1004,6 +909,8 @@ if __name__ == "__main__":
         )
         mkdir_p(save_dir)
         config["save_dir"] = save_dir
+        n = args.config.split("/")
+        shutil.copy(config['inherit_from'], os.path.join(save_dir, n[-1]))
 
     slam = SLAM(config, save_dir=save_dir)
 
