@@ -1,0 +1,113 @@
+Results:
+  save_results: True
+  save_dir: "results/replica"
+  save_trj: True
+  save_trj_kf_intv: 20
+  use_gui: True
+  eval_rendering: True
+  use_wandb: False  
+
+Dataset:
+  sensor_type: 'depth'
+  pcd_downsample: 64
+  pcd_downsample_init: 32
+  adaptive_pointsize: True
+  point_size: 0.05
+  type: 'droid'
+  save_only_kf: True
+  use_droid_keyframe: True
+  global_optimization_during: True
+  global_optimization_num: 4
+  global_optimization_iter_max: 25000
+  refine_pose_from: 200000
+  intrinsic:
+    fx: 600.0
+    fy: 600.0
+    cx: 599.5
+    cy: 339.5
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0
+    width: 1200
+    height: 680
+    depth_scale: 6553.5
+    distorted: False
+
+Tracking:
+  eval_ate: True
+  eval_ate_every: 1
+  eval_ate_after: 10
+  eval_plot_flag: True
+  eval_ate_all: True
+  isotropic_loss_ratio: 0.3
+
+Training:
+  init_itr_num: 1050
+  init_gaussian_update: 100
+  init_gaussian_reset: 500
+  init_gaussian_th: 0.005
+  init_gaussian_extent: 30
+  init_min_opacity: 0.005
+  use_droid_pose: True
+  forward_pose: False
+  prev_pose: False
+  tracking_itr_num: 50
+  tracking_itr_num_droid: 40
+  mapping_itr_num: 100
+  gaussian_update_every: 300
+  gaussian_update_offset: 20
+  gaussian_th: 0.7
+  gaussian_extent: 1.0
+  gaussian_reset: 2001
+  size_threshold: 20
+  kf_interval: 4
+  window_size: 9
+  pose_window: 4
+  edge_threshold: 4
+  rgb_boundary_threshold: 0.01
+  gray_scale_threshold: 0.01
+  depth_ratio: 0.1
+  kf_translation: 0.4
+  kf_min_translation: 0.1
+  kf_max_interval: 50
+  kf_overlap: 0.8
+  kf_cutoff: 0.3
+  prune_mode: 'slam'
+  single_thread: True
+  spherical_harmonics: False
+  max_sh_degree: 3
+  lr:
+    cam_rot_delta: 0.003
+    cam_trans_delta: 0.001
+
+opt_params:
+  iterations: 15000
+  position_lr_init: 0.00016
+  position_lr_final: 0.0000016
+  position_lr_delay_mult: 0.01
+  position_lr_max_steps: 30000
+  feature_lr: 0.0025
+  opacity_lr: 0.05
+  scaling_lr: 0.001
+  rotation_lr: 0.001
+  percent_dense: 0.01
+  lambda_dssim: 0.2
+  densification_interval: 500
+  opacity_reset_interval: 3000
+  densify_from_iter: 500
+  densify_until_iter: 12000
+  densify_grad_threshold: 0.0002
+
+model_params:
+  sh_degree: 0
+  source_path: ""
+  model_path: ""
+  resolution: -1
+  white_background: False
+  data_device: "cuda"
+  
+pipeline_params:
+  convert_SHs_python: False
+  compute_cov3D_python: False
