@@ -5,7 +5,7 @@ _log_styles = {
     "GUI": "bold magenta",
     "Eval": "bold red",
     "    tracking results": "bold yellow",
-    "    mapping results": "bold purple4",
+    "    mapping results": "bold bright_magenta",
 }
 
 
@@ -15,6 +15,6 @@ def get_style(tag):
     return "bold blue"
 
 
-def Log(*args, tag="GS-SLAM",flush=False):
+def Log(*args, tag="3DGS-SLAM",flush=False):
     style = get_style(tag)
     rich.print(f"[{style}]{tag}:[/{style}]", *args, flush = flush)

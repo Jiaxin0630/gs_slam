@@ -189,7 +189,7 @@ class SLAM:
                         cur_frame_idx > self.config['Eval']['eval_ate_after'] and \
                         cur_frame_idx % self.config['Eval']['eval_ate_every'] == 0:                           
                     eval_all  = self.config['Eval']['eval_ate_all']
-                    eval_ate_tracking(self.cameras, self.kf_indices, eval_all=eval_all, correct_scale=True, fig_plot = fig)
+                    eval_ate_tracking(self.cameras, self.kf_indices, eval_all=eval_all, correct_scale=False, fig_plot = fig)
 
                 last_keyframe_idx = self.current_keyframe_window[0]
                 visibility = (render_pkg["n_touched"] > 0).long()
@@ -263,9 +263,10 @@ class SLAM:
                 self.keyframe_optimizers = torch.optim.Adam(opt_params)
                 self.keyframe_mapping(iter_per_kf, render_uncertainty=False)
 
-                if self.config['Eval']['eval_tracking']:
+                if self.config['Eval']['eval_tracking'] and \
+                    cur_frame_idx > self.config['Eval']['eval_ate_after'] :
                     eval_ate_tracking(self.cameras, self.kf_indices, 
-                                      eval_all=self.config['Eval']['eval_ate_all'], correct_scale=True, fig_plot = fig)
+                                      eval_all=self.config['Eval']['eval_ate_all'], correct_scale=False, fig_plot = fig)
                 
                 if self.config['Eval']['eval_mapping']:
                     eval_rendering_mapping(
@@ -291,14 +292,14 @@ class SLAM:
  
         self.final_optimization(render_uncertainty=False)
         
-        # eval_ate(
-        #     self.cameras,
-        #     self.kf_indices,
-        #     self.save_dir,
-        #     0,
-        #     final=True,
-        #     correct_scale=True,
-        # )
+        eval_ate(
+            self.cameras,
+            self.kf_indices,
+            self.save_dir,
+            0,
+            final=True,
+            correct_scale=False,
+        )
 
         eval_rendering(
                 self.cameras,
@@ -313,7 +314,16 @@ class SLAM:
         )
         
         save_gaussians(self.gaussians, self.save_dir, "final", final=True)
-  
+
+        if self.use_gui:
+            self.q_main2vis.put(
+                gui_utils.GaussianPacket(
+                        gaussians=clone_obj(self.gaussians),
+                        current_frame=viewpoint,
+                        keyframes=keyframes,
+                        kf_window=current_keyframe_window_dict,
+                    )
+                )
         
         if self.use_gui:
             q_main2vis.put(gui_utils.GaussianPacket(finish=True))
@@ -605,8 +615,8 @@ class SLAM:
             depth_pixel_mask = (gt_depth > 0.01).view(*depth.shape)
             
             depth_error = torch.abs(depth * depth_pixel_mask - gt_depth * depth_pixel_mask)
-            depth_error =  torch.where(gt_depth * depth_pixel_mask != 0, depth_error / (gt_depth*depth_pixel_mask), torch.tensor(0.0).cuda())
-            depth_error_percent =  (depth_error > depth_error_th).sum() / (gt_depth * depth_pixel_mask).sum()
+            # depth_error =  torch.where(gt_depth * depth_pixel_mask != 0, depth_error / (gt_depth*depth_pixel_mask), torch.tensor(0.0).cuda())
+            depth_error_percent =  (depth_error > depth_error_th).sum() / (gt_depth > 0.01).sum()
 
             
         union = torch.logical_or(
@@ -618,19 +628,19 @@ class SLAM:
         point_ratio_2 = intersection / union    
         if use_droid_keyframe:
             if cur_frame_idx in kf_indices_droid:
-                print("[bold purple4]    keyframe detected based on droid slam[/bold purple4]")
+                print("[bold bright_magenta]    keyframe detected based on droid slam[/bold bright_magenta]")
                 return True
         if (point_ratio_2 < kf_overlap and dist_check2):
-            print("[bold purple4]    keyframe detected because of low overlapping[/bold purple4]")
+            print("[bold bright_magenta]    keyframe detected because of low overlapping[/bold bright_magenta]")
             return True
         elif depth_error_percent > depth_error_percent_th:
-            print("[bold purple4]    keyframe detected because of large depth error[/bold purple4]")
+            print("[bold bright_magenta]    keyframe detected because of large depth error[/bold bright_magenta]")
             return True
         elif dist_check:
-            print("[bold purple4]    keyframe detected because of large translation[/bold purple4]")
+            print("[bold bright_magenta]    keyframe detected because of large translation[/bold bright_magenta]")
             return True
         elif cur_frame_idx > self.kf_indices[-1] + self.config['Training']['kf_max_interval']:
-            print("[bold purple4]    keyframe detected because of large interval[/bold purple4]")
+            print("[bold bright_magenta]    keyframe detected because of large interval[/bold bright_magenta]")
             return True
         else:
             return False     
@@ -872,17 +882,25 @@ class SLAM:
             if iteration % 10 == 0:
                 t.set_description(f"        Loss: {ema_loss_for_log}")
 
+            if iteration % 100 == 0:
+                if self.use_gui:
+                    self.q_main2vis.put(
+                        gui_utils.GaussianPacket(
+                        gaussians=clone_obj(self.gaussians)
+                    )
+            )
+            
             with torch.no_grad():
                 if iteration < self.opt_params.densify_until_iter:
                     self.gaussians.max_radii2D[visibility_filter] = torch.max(self.gaussians.max_radii2D[visibility_filter],
                                                                             radii[visibility_filter])
                     self.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-                    # if iteration > self.opt_params.densify_from_iter and iteration % self.opt_params.densification_interval == 0:
-                    #     size_threshold = 20 if iteration > self.opt_params.opacity_reset_interval else None
-                    #     self.gaussians.densify_and_prune(self.opt_params.densify_grad_threshold, 
-                    #                                     0.005, self.mapping_params.gaussian_extent, size_threshold)
-                    # if iteration % self.opt_params.opacity_reset_interval == 0:
-                    #     self.gaussians.reset_opacity()
+                    if iteration > self.opt_params.densify_from_iter and iteration % self.opt_params.densification_interval == 0:
+                        size_threshold = 20 if iteration > self.opt_params.opacity_reset_interval else None
+                        self.gaussians.densify_and_prune(self.opt_params.densify_grad_threshold, 
+                                                        0.005, self.mapping_params.gaussian_extent, size_threshold)
+                    if iteration % self.opt_params.opacity_reset_interval == 0:
+                        self.gaussians.reset_opacity()
                     
                     self.gaussians.optimizer.step()
                     self.gaussians.optimizer.zero_grad(set_to_none=True)
