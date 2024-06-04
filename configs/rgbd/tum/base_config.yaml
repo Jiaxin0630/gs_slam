@@ -4,7 +4,7 @@ Results:
   save_dir: "results/tum"
   save_trj: True
   save_trj_kf_intv: 5
-  use_gui: False
+  use_gui: True
   use_wandb: False  
 
 Dataset:
@@ -12,17 +12,17 @@ Dataset:
   sensor_type: 'depth'
   save_only_kf: True
   use_droid_keyframe: True
-  pcd_downsample: 60
+  pcd_downsample: 5120
   pcd_downsample_init: 32
   point_size: 0.01
   adaptive_pointsize: True
 
 Eval:
   eval_ate_every: 1
-  eval_ate_after: 10
+  eval_ate_after: 1
   eval_plot_flag: True
   eval_ate_all: True
-  eval_tracking: True
+  eval_tracking: False
   eval_mapping: False
 
 Training:
@@ -34,36 +34,36 @@ Training:
   init_gaussian_extent: 30
 
   # Tracking
-  use_droid_pose: False
+  use_droid_pose: True
   forward_pose: False
-  prev_pose: True
+  prev_pose: False
   tracking_itr_num: 150
-  tracking_itr_num_droid: 100
+  tracking_itr_num_droid: 1
   gray_scale_threshold: 0.01
   tracking_color_ratio: 0.9
   tracking_depth_ratio: 0.1
 
   # Mapping
-  mapping_itr_num: 120
-  gaussian_update_every: 300
+  mapping_itr_num: 5
+  gaussian_update_every: 3000
   gaussian_update_offset: 30
-  gaussian_th: 0.6
+  gaussian_th: 0.3
   gaussian_extent: 1.0
   gaussian_reset: 2001
   size_threshold: 20
-  mapping_color_ratio: 0.8
-  mapping_dssim_ratio: 0.2
-  mapping_depth_ratio: 0.5
+  mapping_color_ratio: 0.9
+  mapping_dssim_ratio: 0.1
+  mapping_depth_ratio: 5
   mapping_isotropic_loss_ratio: 5
   
 
   # Keyframe Selection
   window_size: 8
   pose_window: 4
-  kf_translation: 0.4
-  kf_min_translation: 0.2
-  kf_max_interval : 30
-  kf_overlap: 0.8
+  kf_translation: 0.8
+  kf_min_translation: 0.02
+  kf_max_interval : 40
+  kf_overlap: 0.7
   kf_cutoff: 0.3
   depth_error_percent: 0.3
   depth_error_th: 0.5
@@ -73,32 +73,32 @@ Training:
   spherical_harmonics: True
   max_sh_degree: 3
   lr:
-    cam_rot_delta: 0.003
-    cam_trans_delta: 0.001
+    cam_rot_delta: 0.0000000003
+    cam_trans_delta: 0.00000000001
 
 ## 3DGS default parameters
 opt_params:
   iterations: 20000
   refine_pose_from: 200000
 
-  percent_dense: 0.02
-  densification_interval: 500
+  percent_dense: 0.015
+  densification_interval: 1000
   opacity_reset_interval: 3000
   densify_from_iter: 1000
-  densify_until_iter: 15000
-  densify_grad_threshold: 0.0002
+  densify_until_iter: 13000
+  densify_grad_threshold: 0.00015
 
   color_ratio: 0.8
   dssim_ratio: 0.2
-  depth_ratio: 1
-  isotropic_loss_ratio: 10
+  depth_ratio: 5
+  isotropic_loss_ratio: 6
 
   position_lr_init: 0.00016
   position_lr_final: 0.0000016
   position_lr_delay_mult: 0.01
   position_lr_max_steps: 20000
   feature_lr: 0.0025
-  opacity_lr: 0.05
+  opacity_lr: 0.01
   scaling_lr: 0.001
   rotation_lr: 0.001
 

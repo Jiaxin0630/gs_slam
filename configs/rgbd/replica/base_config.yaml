@@ -4,7 +4,7 @@ Results:
   save_dir: "results/replica"
   save_trj: True
   save_trj_kf_intv: 5
-  use_gui: False
+  use_gui: True
   use_wandb: False  
 
 Dataset:
@@ -37,7 +37,7 @@ Eval:
   eval_plot_flag: True
   eval_ate_all: True
   eval_tracking: True
-  eval_mapping: False
+  eval_mapping: True
 
 Training:
   # Initialization
@@ -74,13 +74,13 @@ Training:
   # Keyframe Selection
   window_size: 8
   pose_window: 4
-  kf_translation: 0.4
-  kf_min_translation: 0.1
-  kf_max_interval : 30
-  kf_overlap: 0.8
+  kf_translation: 0.04
+  kf_min_translation: 0.02
+  kf_max_interval : 10
+  kf_overlap: 0.9
   kf_cutoff: 0.3
   depth_error_percent: 0.3
-  depth_error_th: 0.5
+  depth_error_th: 0.004
   
 
   # rest
