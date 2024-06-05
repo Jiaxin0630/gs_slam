@@ -1,0 +1,4 @@
+inherit_from: "configs/replica/base_config.yaml"
+Dataset:
+  dataset_path: "/media/jiaxin/Jiaxin-usb/ma_final/data/replica/room0/dataDroid"
+  single_thread: False

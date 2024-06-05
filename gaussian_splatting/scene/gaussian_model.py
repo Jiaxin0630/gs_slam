@@ -105,37 +105,191 @@ class GaussianModel:
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
-    def create_pcd_from_image(self, cam_info, init=False, scale=2.0, 
+    def create_pcd_from_image(self, cam_info, init=False, 
                               depthmap=None, renderfunc = None,
                               pipeline_params = None, 
                               background = None):
         cam = cam_info
-        # image_ab = (torch.exp(cam.exposure_a)) * cam.original_image + cam.exposure_b
         image_ab = cam.original_image
         image_ab = torch.clamp(image_ab, 0.0, 1.0)
         rgb_raw = (image_ab * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+        rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
+        depth = o3d.geometry.Image(depthmap.astype(np.float32))
+        
+        if init:
+            downsample_factor = self.config["Dataset"]["pcd_downsample_init"]
+      
+            point_size = self.config["Dataset"]["point_size"]
 
-        if depthmap is not None:
-            rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
-            depth = o3d.geometry.Image(depthmap.astype(np.float32))
+            gray = cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2GRAY)
+            grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            grad_magnitude = cv2.magnitude(grad_x, grad_y)
+
+            # Normalize the gradient magnitude to create a probability map
+            prob_map = grad_magnitude / np.sum(grad_magnitude)
+
+            # Flatten the probability map
+            prob_map_flat = prob_map.flatten()
+            
+            sampled_indices = np.random.choice(
+                prob_map_flat.size, 
+                size=int((np.asarray(rgb).shape[0]*np.asarray(rgb).shape[1]/downsample_factor)), 
+                p=prob_map_flat)
+            
+            
+            non_presence_mask = np.asarray(depth) < 0.0
+            non_presence_mask = non_presence_mask.reshape(-1)
+            non_presence_mask[sampled_indices]=True
+            rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
+                rgb,
+                depth,
+                depth_scale=1.0,
+                depth_trunc=100.0,
+                convert_rgb_to_intensity=False,
+            )
+
+            W2C = getWorld2View2(cam.R, cam.T).cpu().numpy()
+            pcd_tmp = o3d.geometry.PointCloud.create_from_rgbd_image(
+                rgbd,
+                o3d.camera.PinholeCameraIntrinsic(
+                    cam.image_width,
+                    cam.image_height,
+                    cam.fx,
+                    cam.fy,
+                    cam.cx,
+                    cam.cy,
+                ),
+                extrinsic=W2C,
+                project_valid_depth_only=False,
+            )
+            new_xyz_temp = np.asarray(pcd_tmp.points)
+            new_rgb_temp = np.asarray(pcd_tmp.colors)
+            
+            new_xyz = new_xyz_temp[non_presence_mask]
+            new_rgb = new_rgb_temp[non_presence_mask]
+            new_rgb = new_rgb[~np.isnan(new_xyz).any(axis=1)]
+            new_xyz = new_xyz[~np.isnan(new_xyz).any(axis=1)]
         else:
-            depth_raw = cam.depth
-            if depth_raw is None:
-                depth_raw = np.empty((cam.image_height, cam.image_width))
+            with torch.no_grad():
+                point_size = self.config["Dataset"]["point_size"]
+                render_pkg = renderfunc(
+                    cam, self, pipeline_params, background
+                )
+                
+                gray = cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2GRAY)
+                grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+                grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+                grad_magnitude = cv2.magnitude(grad_x, grad_y)
 
-            if self.config["Dataset"]["sensor_type"] == "monocular":
-                depth_raw = (
-                    np.ones_like(depth_raw)
-                    + (np.random.randn(depth_raw.shape[0], depth_raw.shape[1]) - 0.5)
-                    * 0.05
-                ) * scale
+                # Normalize the gradient magnitude to create a probability map
+                prob_map = grad_magnitude / np.sum(grad_magnitude)
 
-            rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
-            depth = o3d.geometry.Image(depth_raw.astype(np.float32))
+                # Flatten the probability map
+                prob_map_flat = prob_map.flatten()
+                
+                sampled_indices = np.random.choice(
+                    prob_map_flat.size, 
+                    size=int((np.asarray(rgb).shape[0]*np.asarray(rgb).shape[1]/self.config["Dataset"]["pcd_downsample"])), 
+                    p=prob_map_flat)
+                
+                render_depth = render_pkg["depth"].cpu()
+                opacity = render_pkg["opacity"].cpu()
+                self.optimizer.zero_grad(set_to_none=True)
+                opacity_mask = opacity < 0.05
+                
+                depth_torch = torch.from_numpy(np.asarray(depth)).cpu()
+                depth_error = torch.abs(depth_torch- render_depth) * (depth_torch > 0)
+                # depth_guided = torch.where(depth_torch != 0, depth_error / depth_torch, torch.tensor(0.0))
+                
+                non_presence_mask = torch.logical_and(depth_error > 60*depth_error.median(), render_depth > depth_torch) 
+                
+                non_presence_mask =  torch.logical_or(non_presence_mask, opacity_mask)
+                
+                non_presence_mask = non_presence_mask.reshape(-1)
+                non_presence_mask [sampled_indices] = True
+                
+                true_indices = torch.nonzero(non_presence_mask, as_tuple=False).squeeze()
+    
+                true_count = true_indices.size(0)
+                max_true_count =  int((np.asarray(rgb).shape[0]*np.asarray(rgb).shape[1]/self.config["Dataset"]["pcd_downsample"]))
+                if true_count > max_true_count:
+                    excess_count = true_count - max_true_count
+                    random_indices = torch.randperm(true_count)[:excess_count]
+                    non_presence_mask[true_indices[random_indices]] = False
+                    
+                rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
+                    rgb,
+                    depth,
+                    depth_scale=1.0,
+                    depth_trunc=100.0,
+                    convert_rgb_to_intensity=False,
+                )
 
-        return self.create_pcd_from_image_and_depth(cam, rgb, depth, init, render = renderfunc,
-                                                    pipeline_params = pipeline_params,
-                                                    background = background)
+                W2C = getWorld2View2(cam.R, cam.T).cpu().numpy()
+                pcd_tmp = o3d.geometry.PointCloud.create_from_rgbd_image(
+                    rgbd,
+                    o3d.camera.PinholeCameraIntrinsic(
+                        cam.image_width,
+                        cam.image_height,
+                        cam.fx,
+                        cam.fy,
+                        cam.cx,
+                        cam.cy,
+                    ),
+                    extrinsic=W2C,
+                    project_valid_depth_only=False,
+                )
+                new_xyz_temp = np.asarray(pcd_tmp.points)
+                new_rgb_temp = np.asarray(pcd_tmp.colors)
+                
+                new_xyz = new_xyz_temp[non_presence_mask.numpy()]
+                new_rgb = new_rgb_temp[non_presence_mask.numpy()]
+                new_rgb = new_rgb[~np.isnan(new_xyz).any(axis=1)]
+                new_xyz = new_xyz[~np.isnan(new_xyz).any(axis=1)]
+            
+            torch.cuda.empty_cache()
+            
+        pcd = BasicPointCloud(
+                points=new_xyz, colors=new_rgb, normals=np.zeros((new_xyz.shape[0], 3))
+            )
+        if np.asarray(pcd.points).size != 0:
+            self.ply_input = pcd
+
+            fused_point_cloud = torch.from_numpy(np.asarray(pcd.points)).float().cuda()
+            fused_color = RGB2SH(torch.from_numpy(np.asarray(pcd.colors)).float().cuda())
+            features = (
+                torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2))
+                .float()
+                .cuda()
+            )
+            features[:, :3, 0] = fused_color
+            features[:, 3:, 1:] = 0.0
+
+            dist2 = (
+                torch.clamp_min(
+                    distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()),
+                    0.0000001,
+                )
+                * point_size
+            )
+            scales = torch.log(torch.sqrt(dist2))[..., None]
+            if not self.isotropic:
+                scales = scales.repeat(1, 3)
+
+            rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
+            rots[:, 0] = 1
+            opacities = inverse_sigmoid(
+                0.5
+                * torch.ones(
+                    (fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"
+                )
+            )
+            
+            return fused_point_cloud, features, scales, rots, opacities
+        else:
+            return None, None, None, None, None
+        
 
     def create_pcd_from_image_and_depth2(self, cam, rgb, depth, init=False, 
                                         render = None,
@@ -484,22 +638,193 @@ class GaussianModel:
             new_n_obs=new_n_obs,
         )
 
-    def extend_from_pcd_seq(
-        self, cam_info, kf_id=-1, init=False, scale=2.0, depthmap=None, 
+    def extend_from_viewpoint(
+        self, cam_info, kf_id=-1, init=False, depthmap=None, 
         render = None,
         pipeline_params = None, 
         background = None
     ):
-        fused_point_cloud, features, scales, rots, opacities = (
-            self.create_pcd_from_image(cam_info, init, scale=scale, depthmap=depthmap, 
-                                       renderfunc=render,
-                                       pipeline_params = pipeline_params, 
-                                       background = background)
-        )
+        cam = cam_info
+        image_ab = cam.original_image
+        image_ab = torch.clamp(image_ab, 0.0, 1.0)
+        rgb_raw = (image_ab * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+        rgb = o3d.geometry.Image(rgb_raw.astype(np.uint8))
+        depth = o3d.geometry.Image(depthmap.astype(np.float32))
+        
+        if init:
+            downsample_factor = self.config["Dataset"]["pcd_downsample_init"]
+      
+            point_size = self.config["Dataset"]["point_size"]
+
+            gray = cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2GRAY)
+            grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            grad_magnitude = cv2.magnitude(grad_x, grad_y)
+
+            # Normalize the gradient magnitude to create a probability map
+            prob_map = grad_magnitude / np.sum(grad_magnitude)
+
+            # Flatten the probability map
+            prob_map_flat = prob_map.flatten()
+            
+            sampled_indices = np.random.choice(
+                prob_map_flat.size, 
+                size=int((np.asarray(rgb).shape[0]*np.asarray(rgb).shape[1]/downsample_factor)), 
+                p=prob_map_flat)
+            
+            non_presence_mask = np.asarray(depth) < 0.0
+            non_presence_mask = non_presence_mask.reshape(-1)
+            non_presence_mask[sampled_indices]=True
+            rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
+                rgb,
+                depth,
+                depth_scale=1.0,
+                depth_trunc=100.0,
+                convert_rgb_to_intensity=False,
+            )
+
+            W2C = getWorld2View2(cam.R, cam.T).cpu().numpy()
+            pcd_tmp = o3d.geometry.PointCloud.create_from_rgbd_image(
+                rgbd,
+                o3d.camera.PinholeCameraIntrinsic(
+                    cam.image_width,
+                    cam.image_height,
+                    cam.fx,
+                    cam.fy,
+                    cam.cx,
+                    cam.cy,
+                ),
+                extrinsic=W2C,
+                project_valid_depth_only=False,
+            )
+            new_xyz_temp = np.asarray(pcd_tmp.points)
+            new_rgb_temp = np.asarray(pcd_tmp.colors)
+            
+            new_xyz = new_xyz_temp[non_presence_mask]
+            new_rgb = new_rgb_temp[non_presence_mask]
+            new_rgb = new_rgb[~np.isnan(new_xyz).any(axis=1)]
+            new_xyz = new_xyz[~np.isnan(new_xyz).any(axis=1)]
+        else:
+            with torch.no_grad():
+                point_size = self.config["Dataset"]["point_size"]
+                render_pkg = render(
+                    cam, self, pipeline_params, background
+                )
+                
+                gray = cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2GRAY)
+                grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+                grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+                grad_magnitude = cv2.magnitude(grad_x, grad_y)
+
+                # Normalize the gradient magnitude to create a probability map
+                prob_map = grad_magnitude / np.sum(grad_magnitude)
+
+                # Flatten the probability map
+                prob_map_flat = prob_map.flatten()
+                
+                sampled_indices = np.random.choice(
+                    prob_map_flat.size, 
+                    size=int((np.asarray(rgb).shape[0]*np.asarray(rgb).shape[1]/self.config["Dataset"]["pcd_downsample"])), 
+                    p=prob_map_flat)
+                
+                render_depth = render_pkg["depth"].cpu()
+                opacity = render_pkg["opacity"].cpu()
+                self.optimizer.zero_grad(set_to_none=True)
+                opacity_mask = opacity < 0.05
+                
+                depth_torch = torch.from_numpy(np.asarray(depth)).cpu()
+                depth_error = torch.abs(depth_torch- render_depth) * (depth_torch > 0)
+                # depth_guided = torch.where(depth_torch != 0, depth_error / depth_torch, torch.tensor(0.0))
+                
+                non_presence_mask = torch.logical_and(depth_error > 60*depth_error.median(), render_depth > depth_torch) 
+                
+                non_presence_mask =  torch.logical_or(non_presence_mask, opacity_mask)
+                
+                non_presence_mask = non_presence_mask.reshape(-1)
+                non_presence_mask [sampled_indices] = True
+                
+                true_indices = torch.nonzero(non_presence_mask, as_tuple=False).squeeze()
+    
+                true_count = true_indices.size(0)
+                max_true_count =  int((np.asarray(rgb).shape[0]*np.asarray(rgb).shape[1]/self.config["Dataset"]["pcd_downsample"]))
+                if true_count > max_true_count:
+                    excess_count = true_count - max_true_count
+                    random_indices = torch.randperm(true_count)[:excess_count]
+                    non_presence_mask[true_indices[random_indices]] = False
+                    
+                rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
+                    rgb,
+                    depth,
+                    depth_scale=1.0,
+                    depth_trunc=100.0,
+                    convert_rgb_to_intensity=False,
+                )
+
+                W2C = getWorld2View2(cam.R, cam.T).cpu().numpy()
+                pcd_tmp = o3d.geometry.PointCloud.create_from_rgbd_image(
+                    rgbd,
+                    o3d.camera.PinholeCameraIntrinsic(
+                        cam.image_width,
+                        cam.image_height,
+                        cam.fx,
+                        cam.fy,
+                        cam.cx,
+                        cam.cy,
+                    ),
+                    extrinsic=W2C,
+                    project_valid_depth_only=False,
+                )
+                new_xyz_temp = np.asarray(pcd_tmp.points)
+                new_rgb_temp = np.asarray(pcd_tmp.colors)
+                
+                new_xyz = new_xyz_temp[non_presence_mask.numpy()]
+                new_rgb = new_rgb_temp[non_presence_mask.numpy()]
+                new_rgb = new_rgb[~np.isnan(new_xyz).any(axis=1)]
+                new_xyz = new_xyz[~np.isnan(new_xyz).any(axis=1)]
+            
+            torch.cuda.empty_cache()
+            
+        pcd = BasicPointCloud(
+                points=new_xyz, colors=new_rgb, normals=np.zeros((new_xyz.shape[0], 3))
+            )
+        if np.asarray(pcd.points).size != 0:
+            self.ply_input = pcd
+
+            fused_point_cloud = torch.from_numpy(np.asarray(pcd.points)).float().cuda()
+            fused_color = RGB2SH(torch.from_numpy(np.asarray(pcd.colors)).float().cuda())
+            features = (
+                torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2))
+                .float()
+                .cuda()
+            )
+            features[:, :3, 0] = fused_color
+            features[:, 3:, 1:] = 0.0
+
+            dist2 = (
+                torch.clamp_min(
+                    distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()),
+                    0.0000001,
+                )
+                * point_size
+            )
+            scales = torch.log(torch.sqrt(dist2))[..., None]
+            if not self.isotropic:
+                scales = scales.repeat(1, 3)
+
+            rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
+            rots[:, 0] = 1
+            opacities = inverse_sigmoid(
+                0.5
+                * torch.ones(
+                    (fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"
+                )
+            )
+  
         if fused_point_cloud is not None:
             self.extend_from_pcd(
                 fused_point_cloud, features, scales, rots, opacities, kf_id
             )
+            
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense

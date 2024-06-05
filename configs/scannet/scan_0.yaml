@@ -1,0 +1,18 @@
+inherit_from: "configs/scannet/base_config.yaml"
+
+Dataset:
+  dataset_path: "/media/jiaxin/Jiaxin-usb/ma_final/data/scannet/scan_0/dataDroid"
+  intrinsic:
+    fx: 577.26356
+    fy: 579.51459
+    cx: 319.21429
+    cy: 243.41206
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0
+    distorted: False
+    width: 640
+    height: 480
+    depth_scale: 1000.0

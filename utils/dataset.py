@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
-from utils.math_utils import qvec2rotmat
+from utils.math import qvec2rotmat
 from gaussian_splatting.utils.graphics_utils import focal2fov
     
 class DroidParser:

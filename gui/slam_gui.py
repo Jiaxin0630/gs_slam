@@ -25,8 +25,8 @@ from gui.gui_utils import (
     cv_gl,
     get_latest_queue,
 )
-from utils.camera_utils import Camera
-from utils.logging_utils import Log
+from utils.camera import Camera
+from utils.logging import Log
 
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
